@@ -4,7 +4,7 @@ import requests
 from datetime import datetime, timedelta
 import re
 import smtplib
-from email.mime_text import MIMEText
+from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # =========================
