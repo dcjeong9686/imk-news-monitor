@@ -11,7 +11,28 @@ from email.mime.multipart import MIMEMultipart
 # 1. 기본 설정
 # =========================
 
-KEYWORDS = ["아이마켓코리아", "그래디언트", "삼성", "서브원"]
+# 그룹별 키워드
+RELATION_KEYWORDS = [
+    "아이마켓코리아",
+    "그래디언트",
+    "테라펙스",
+    "GBCC",
+    "그래디언트바이오컨버전스",
+    "안연케어",
+]
+
+CUSTOMER_KEYWORDS = [
+    "삼성",
+]
+
+COMPETITOR_KEYWORDS = [
+    "서브원",
+    "코리아이플랫폼",
+    "행복나래",
+]
+
+# 전체 크롤링용 키워드 (3그룹 합친 것)
+KEYWORDS = RELATION_KEYWORDS + CUSTOMER_KEYWORDS + COMPETITOR_KEYWORDS
 
 NAVER_CLIENT_ID = "A4iaEzPgpbxGewkEWvyW"
 NAVER_CLIENT_SECRET = "DPyZaHzOEZ"
@@ -23,12 +44,12 @@ SMTP_PASSWORD = "여기에_메일_비밀번호_또는_앱비밀번호"
 FROM_EMAIL = SMTP_USER
 
 st.set_page_config(
-    page_title="뉴스 모니터링",
+    page_title="네이버 키워드 뉴스 모니터링",
     page_icon="",
     layout="wide",
 )
 
-# 사이드바 스타일 (밝은 파란색 배경 + 흰 글씨)
+# 사이드바 / 카드 스타일
 st.markdown(
     """
     <style>
@@ -43,7 +64,6 @@ st.markdown(
         color: white !important;
     }
 
-    /* 카드 스타일: 둥근 사각형 + 연한 테두리 + 약간의 그림자 */
     .news-card, .scrap-card {
         border-radius: 12px;
         border: 1px solid #e5e7eb;
@@ -66,13 +86,14 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.title("뉴스 모니터링")
+st.title("네이버 키워드 뉴스 모니터링 대시보드")
 st.write(
-    "지정한 키워드를 기준으로 한시간 간격 자동업데이트 됩니다. "
+    "관계사·고객사·경쟁사 동향을 키워드 기반으로 모니터링하고, "
+    "수동/자동 업데이트, 스크랩, 메일 발송 기능을 제공합니다."
 )
 
 # =========================
-# 유틸
+# 유틸 함수들
 # =========================
 
 def widget_key(prefix: str, link: str) -> str:
@@ -170,10 +191,10 @@ if "scrap_df" not in st.session_state:
 top_col1, top_col2, top_col3 = st.columns([1, 1, 3])
 
 with top_col1:
-    manual_refresh = st.button("업데이트")
+    manual_refresh = st.button("지금 수동 업데이트")
 
 with top_col2:
-    scrap_button_top = st.button("기사 스크랩")
+    scrap_button_top = st.button("선택 기사 스크랩함에 저장")
 
 with top_col3:
     if st.session_state["last_update"]:
@@ -196,53 +217,62 @@ def load_data():
 
 last = st.session_state["last_update"]
 need_refresh = not last or (datetime.now().astimezone() - last > timedelta(hours=1))
-
 if manual_refresh or need_refresh:
-    with st.spinner("뉴스 가져오는 중..."):
+    with st.spinner("네이버 뉴스 가져오는 중..."):
         load_data()
 
 # =========================
-# 사이드바
+# 사이드바: 그룹별 탭 + 메일
 # =========================
 
 with st.sidebar:
-    st.header("보기")
-    mode = st.radio("모드", ["뉴스", "스크랩"], index=0)
-    if mode == "뉴스":
-        st.markdown("---")
-        keyword_choice = st.radio("키워드 선택", ["전체"] + KEYWORDS, index=0)
+    st.header("보기 모드")
+    mode = st.radio(
+        "카테고리 선택",
+        ["관계사 동향", "고객사 동향", "경쟁사 동향", "스크랩"],
+        index=0,
+    )
+
+    if mode != "스크랩":
         st.markdown("---")
         recipient_email = st.text_input(
             "받는 사람 이메일", placeholder="example@imarketkorea.com"
         )
         send_mail_button = st.button("현재 화면 기사 메일 발송")
     else:
-        keyword_choice, recipient_email, send_mail_button = None, None, False
+        recipient_email = None
+        send_mail_button = False
 
 # =========================
-# 메인: 뉴스 모드
+# 메인: 그룹별 뉴스 모드
 # =========================
 
-if mode == "뉴스":
-    df_view = st.session_state["history_df"]
-    if keyword_choice != "전체":
-        df_view = df_view[df_view["keyword"] == keyword_choice]
+history_df = st.session_state["history_df"]
 
-    st.subheader(
-        "전체 키워드 기사 목록"
-        if keyword_choice == "전체"
-        else f"'{keyword_choice}' 키워드 기사 목록"
-    )
+if mode != "스크랩":
+    if mode == "관계사 동향":
+        group_label = "관계사 동향"
+        group_keywords = RELATION_KEYWORDS
+    elif mode == "고객사 동향":
+        group_label = "고객사 동향"
+        group_keywords = CUSTOMER_KEYWORDS
+    else:  # 경쟁사 동향
+        group_label = "경쟁사 동향"
+        group_keywords = COMPETITOR_KEYWORDS
+
+    df_view = history_df[history_df["keyword"].isin(group_keywords)]
+
+    st.subheader(f"{group_label} 기사 목록")
 
     if df_view.empty:
         st.info("현재 조건에 해당하는 뉴스가 없습니다.")
     else:
         selected_links = []
 
-        # 전체일 때: 키워드별 가로 컬럼 + 카드형
-        if keyword_choice == "전체":
-            cols = st.columns(len(KEYWORDS))
-            for kw, col in zip(KEYWORDS, cols):
+        # 키워드가 여러 개면 가로 컬럼 배치, 하나면 세로 리스트
+        if len(group_keywords) > 1:
+            cols = st.columns(len(group_keywords))
+            for kw, col in zip(group_keywords, cols):
                 with col:
                     st.markdown(f"**{kw}**")
                     df_kw = df_view[df_view["keyword"] == kw]
@@ -260,7 +290,7 @@ if mode == "뉴스":
                             ck = widget_key("select", link)
 
                             st.markdown('<div class="news-card">', unsafe_allow_html=True)
-                            c1, c2 = st.columns([0.18, 0.82])
+                            c1, c2 = st.columns([0.2, 0.8])
                             with c1:
                                 checked = st.checkbox("", key=ck)
                             with c2:
@@ -277,7 +307,7 @@ if mode == "뉴스":
                             if checked:
                                 selected_links.append(link)
         else:
-            # 단일 키워드: 카드형 세로 리스트
+            # 키워드가 하나일 때 (예: 고객사 동향 - 삼성)
             for _, row in df_view.iterrows():
                 link = row["link"]
                 pub = row["published"]
@@ -309,9 +339,7 @@ if mode == "뉴스":
             if not selected_links:
                 st.warning("스크랩할 기사를 하나 이상 선택해주세요.")
             else:
-                new = st.session_state["history_df"][
-                    st.session_state["history_df"]["link"].isin(selected_links)
-                ]
+                new = history_df[history_df["link"].isin(selected_links)]
                 st.session_state["scrap_df"] = (
                     pd.concat([st.session_state["scrap_df"], new])
                     .drop_duplicates("link")
@@ -333,8 +361,7 @@ if mode == "뉴스":
         # 메일 발송
         if send_mail_button:
             try:
-                label = keyword_choice if keyword_choice != "전체" else "전체 키워드"
-                send_email(recipient_email, label, df_view)
+                send_email(recipient_email, group_label, df_view)
                 st.success("메일 발송을 완료했습니다.")
             except Exception as e:
                 st.error(f"메일 발송 중 오류: {e}")
