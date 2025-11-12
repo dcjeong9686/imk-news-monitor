@@ -13,8 +13,8 @@ from email.mime.multipart import MIMEMultipart
 
 # 관계사: 화면에 보여줄 키워드 (컬럼 이름용)
 RELATION_KEYWORDS = [
-    "아이마켓코리아",
     "그래디언트",
+    "아이마켓코리아",
     "테라펙스",
     "GBCC",        # 🔹 GBCC 그룹 (GBCC + 그래디언트바이오컨버전스)
     "안연케어",
@@ -22,8 +22,8 @@ RELATION_KEYWORDS = [
 
 # 관계사: 실제 네이버에 검색할 키워드 (GBCC 그룹에 alias 추가)
 RELATION_SEARCH_KEYWORDS = [
-    "아이마켓코리아",
     "그래디언트",
+    "아이마켓코리아",
     "테라펙스",
     "GBCC",
     "그래디언트바이오컨버전스",   # 🔹 GBCC로 묶일 alias
@@ -55,7 +55,7 @@ SMTP_PASSWORD = "여기에_네이버_앱비밀번호_또는_메일비밀번호"
 FROM_EMAIL = SMTP_USER
 
 st.set_page_config(
-    page_title="네이버 키워드 뉴스 모니터링",
+    page_title="뉴스 모니터링",
     page_icon="",
     layout="wide",
 )
@@ -108,10 +108,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.title("네이버 키워드 뉴스 모니터링 대시보드")
+st.title("뉴스 모니터링")
 st.write(
-    "관계사·고객사·경쟁사 동향을 키워드 기반으로 모니터링하고, "
-    "수동/자동 업데이트, 스크랩, 메일 발송 기능을 제공합니다."
+    "한시간 단위 자동 업데이트"
 )
 
 # =========================
@@ -227,9 +226,9 @@ if "scrap_df" not in st.session_state:
 
 top_col1, top_col2, top_col3 = st.columns([1, 1, 3])
 with top_col1:
-    manual_refresh = st.button("지금 수동 업데이트")
+    manual_refresh = st.button("수동 업데이트")
 with top_col2:
-    scrap_button_top = st.button("선택 기사 스크랩함에 저장")
+    scrap_button_top = st.button("기사 스크랩")
 with top_col3:
     if st.session_state["last_update"]:
         st.caption(
@@ -265,7 +264,7 @@ with st.sidebar:
     st.header("보기 모드")
     mode = st.radio(
         "카테고리 선택",
-        ["전체", "관계사 동향", "고객사 동향", "경쟁사 동향", "스크랩"],
+        ["전체", "관계사 동향", "삼성 동향", "경쟁사 동향", "스크랩"],
         index=0,
     )
 
@@ -362,9 +361,9 @@ if mode != "스크랩":
     elif mode == "관계사 동향":
         df_view = history_df[history_df["keyword"].isin(RELATION_KEYWORDS)]
         group_label = "관계사 동향"
-    elif mode == "고객사 동향":
+    elif mode == "삼성 동향":
         df_view = history_df[history_df["keyword"].isin(CUSTOMER_KEYWORDS)]
-        group_label = "고객사 동향"
+        group_label = "삼성 동향"
     else:  # 경쟁사 동향
         df_view = history_df[history_df["keyword"].isin(COMPETITOR_KEYWORDS)]
         group_label = "경쟁사 동향"
@@ -389,9 +388,9 @@ if mode != "스크랩":
 
             # 고객사 동향 블록
             customer_df = df_view[df_view["keyword"].isin(CUSTOMER_KEYWORDS)]
-            st.markdown("#### 고객사 동향")
+            st.markdown("#### 삼성 동향")
             if customer_df.empty:
-                st.caption("고객사 관련 기사가 없습니다.")
+                st.caption("삼성 관련 기사가 없습니다.")
             else:
                 render_vertical_list(customer_df, selected_links, show_keyword=True)
 
@@ -409,7 +408,7 @@ if mode != "스크랩":
         else:
             if mode == "관계사 동향":
                 group_keywords = RELATION_KEYWORDS
-            elif mode == "고객사 동향":
+            elif mode == "삼성 동향":
                 group_keywords = CUSTOMER_KEYWORDS
             else:
                 group_keywords = COMPETITOR_KEYWORDS
@@ -419,7 +418,7 @@ if mode != "스크랩":
                 render_keyword_columns(df_view, group_keywords, selected_links)
             else:
                 # 고객사(삼성): 세로 리스트
-                render_vertical_list(df_view, selected_links, show_keyword=True)
+                render_keyword_columns(df_view, selected_links, show_keyword=True)
 
     # 🔹 스크랩 저장
     if scrap_button_top:
