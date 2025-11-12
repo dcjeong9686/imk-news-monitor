@@ -6,6 +6,7 @@ import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from bs4 import BeautifulSoup  # 기사 요약용
 
 # =========================
 # 1. 기본 설정
@@ -36,14 +37,15 @@ KEYWORDS = RELATION_KEYWORDS + CUSTOMER_KEYWORDS + COMPETITOR_KEYWORDS
 NAVER_CLIENT_ID = "A4iaEzPgpbxGewkEWvyW"
 NAVER_CLIENT_SECRET = "DPyZaHzOEZ"
 
-SMTP_SERVER = "smtp.your-company.com"
+# 🔹 SMTP 설정 (네이버 메일 기준 예시)
+SMTP_SERVER = "smtp.naver.com"
 SMTP_PORT = 587
-SMTP_USER = "dc.jeong@imarketkorea.com"
-SMTP_PASSWORD = "여기에_메일_비밀번호_또는_앱비밀번호"
-FROM_EMAIL = SMTP_USER
+SMTP_USER = "wjdeocjf1708@naver.com"
+SMTP_PASSWORD = "여기에_네이버_메일_비밀번호_또는_앱비밀번호"
+FROM_EMAIL = "wjdeocjf1708@naver.com"   # 요청하신 발신자 메일
 
 st.set_page_config(
-    page_title="네이버 키워드 뉴스 모니터링",
+    page_title="뉴스 모니터링",
     page_icon="",
     layout="wide",
 )
@@ -63,6 +65,7 @@ st.markdown(
         color: white !important;
     }
 
+    /* 카드 스타일 */
     .news-card, .scrap-card {
         border-radius: 12px;
         border: 1px solid #e5e7eb;
@@ -80,15 +83,25 @@ st.markdown(
         font-size: 0.8rem;
         color: #6b7280;
     }
+
+    /* 🔹 사이드바 입력창/버튼 글씨는 검정색으로 */
+    [data-testid="stSidebar"] input,
+    [data-testid="stSidebar"] textarea {
+        color: black !important;
+    }
+    [data-testid="stSidebar"] button[kind="secondary"],
+    [data-testid="stSidebar"] button[kind="primary"],
+    [data-testid="stSidebar"] button {
+        color: black !important;
+    }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-st.title("네이버 키워드 뉴스 모니터링 대시보드")
+st.title("뉴스 모니터링")
 st.write(
-    "관계사·고객사·경쟁사 동향을 키워드 기반으로 모니터링하고, "
-    "수동/자동 업데이트, 스크랩, 메일 발송 기능을 제공합니다."
+    "한시간 단위 자동 업데이트 "
 )
 
 # =========================
@@ -141,32 +154,72 @@ def fetch_all_news():
     df = pd.DataFrame(all_items).drop_duplicates("link")
     return df.sort_values("published", ascending=False, na_position="last")
 
+# 🔹 체크된 기사만 메일 발송하는 함수
 def send_email(to_email: str, keyword_label: str, df: pd.DataFrame):
     if df.empty:
         raise ValueError("메일로 보낼 기사 데이터가 없습니다.")
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    subject = f"[키워드 뉴스] {keyword_label} 기사 목록 - {now_str}"
-    lines = [f"조건: {keyword_label}", "", "기사 목록:", "-" * 40]
+
+    # 제목 고정: "Daily 뉴스"
+    subject = "Daily 뉴스"
+
+    lines = []
+    lines.append(f"조건: {keyword_label}")
+    lines.append("")
+    lines.append("기사 목록:")
+    lines.append("-" * 40)
+
     for _, row in df.iterrows():
-        pub_str = (
-            row["published"].strftime("%Y-%m-%d %H:%M")
-            if pd.notnull(row["published"])
-            else ""
-        )
-        lines += [
-            f"- [{row['keyword']}] {row['title']}",
-            f"  · 날짜: {pub_str}",
-            f"  · 링크: {row['link']}",
-            "",
-        ]
+        title = row["title"]
+        link = row["link"]
+        kw = row.get("keyword", "")
+        pub_str = ""
+        if pd.notnull(row["published"]):
+            pub_str = row["published"].strftime("%Y-%m-%d %H:%M")
+        lines.append(f"- [{kw}] {title}")
+        lines.append(f"  · 날짜: {pub_str}")
+        lines.append(f"  · 링크: {link}")
+        lines.append("")
+
     body = "\n".join(lines)
+
     msg = MIMEMultipart()
-    msg["From"], msg["To"], msg["Subject"] = FROM_EMAIL, to_email, subject
+    msg["From"] = FROM_EMAIL
+    msg["To"] = to_email
+    msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain", _charset="utf-8"))
-    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as s:
-        s.starttls()
-        s.login(SMTP_USER, SMTP_PASSWORD)
-        s.send_message(msg)
+
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.send_message(msg)
+
+# 🔹 기사 요약 추출 함수
+def get_article_summary(url: str) -> str:
+    try:
+        res = requests.get(url, timeout=5)
+        if res.status_code != 200:
+            return "요약을 불러오지 못했습니다. (사이트 응답 오류)"
+
+        soup = BeautifulSoup(res.text, "html.parser")
+
+        og_desc = soup.find("meta", attrs={"property": "og:description"})
+        if og_desc and og_desc.get("content"):
+            text = og_desc["content"].strip()
+        else:
+            body = soup.find(id="dic_area") or soup.find("div", {"class": "newsct_article"})
+            if body:
+                text = body.get_text(" ", strip=True)
+            else:
+                text = soup.get_text(" ", strip=True)
+
+        text = re.sub(r"\s+", " ", text)
+        if len(text) > 400:
+            text = text[:400] + " ..."
+        if not text:
+            return "요약할 수 있는 본문을 찾지 못했습니다."
+        return text
+    except Exception:
+        return "요약을 불러오는 중 오류가 발생했습니다."
 
 # =========================
 # 세션 상태 초기화
@@ -182,6 +235,11 @@ if "scrap_df" not in st.session_state:
     st.session_state["scrap_df"] = pd.DataFrame(
         columns=["keyword", "title", "link", "published"]
     )
+# 요약 패널용 상태
+if "summary_info" not in st.session_state:
+    st.session_state["summary_info"] = None
+if "summary_text" not in st.session_state:
+    st.session_state["summary_text"] = None
 
 # =========================
 # 상단 컨트롤 (업데이트 + 스크랩 버튼)
@@ -190,10 +248,10 @@ if "scrap_df" not in st.session_state:
 top_col1, top_col2, top_col3 = st.columns([1, 1, 3])
 
 with top_col1:
-    manual_refresh = st.button("지금 수동 업데이트")
+    manual_refresh = st.button("수동 업데이트")
 
 with top_col2:
-    scrap_button_top = st.button("선택 기사 스크랩함에 저장")
+    scrap_button_top = st.button("기사 스크랩")
 
 with top_col3:
     if st.session_state["last_update"]:
@@ -245,12 +303,43 @@ with st.sidebar:
         send_mail_button = False
 
 # =========================
+# 요약 패널 렌더링 함수
+# =========================
+
+def render_summary_panel():
+    st.markdown("#### 기사 요약")
+    info = st.session_state.get("summary_info")
+    text = st.session_state.get("summary_text")
+
+    if not info:
+        st.info("요약을 보고 싶은 기사의 '요약 보기' 버튼을 눌러주세요.")
+        return
+
+    title = info.get("title", "")
+    link = info.get("link", "")
+    keyword = info.get("keyword", "")
+    published = info.get("published", None)
+
+    if isinstance(published, datetime):
+        pub_str = published.strftime("%Y-%m-%d %H:%M")
+    else:
+        pub_str = ""
+
+    st.markdown(f"**{title}**")
+    if link:
+        st.markdown(f"[기사 링크 바로가기]({link})")
+    meta_line = " · ".join(x for x in [keyword, pub_str] if x)
+    if meta_line:
+        st.caption(meta_line)
+
+    st.write(text or "요약 내용을 가져오지 못했습니다.")
+
+# =========================
 # 메인: 뉴스 모드 (전체 + 3그룹)
 # =========================
 
 if mode != "스크랩":
 
-    # 공통: 뷰용 데이터
     if mode == "전체":
         df_view = history_df.copy()
         group_label = "전체 동향"
@@ -266,255 +355,298 @@ if mode != "스크랩":
 
     st.subheader(f"{group_label} 기사 목록")
 
-    if df_view.empty:
-        st.info("현재 조건에 해당하는 뉴스가 없습니다.")
-    else:
-        selected_links = []
+    main_col, summary_col = st.columns([3, 1])
 
-        # 1) 전체 모드: 관계사/고객사/경쟁사 블록을 순서대로 표시
-        if mode == "전체":
-            # 관계사 동향 블록
-            relation_df = df_view[df_view["keyword"].isin(RELATION_KEYWORDS)]
-            st.markdown("#### 관계사 동향")
-            if relation_df.empty:
-                st.caption("관계사 관련 기사가 없습니다.")
-            else:
-                cols_rel = st.columns(len(RELATION_KEYWORDS))
-                for kw, col in zip(RELATION_KEYWORDS, cols_rel):
-                    with col:
-                        st.markdown(f"**{kw}**")
-                        df_kw = relation_df[relation_df["keyword"] == kw]
-                        if df_kw.empty:
-                            st.caption("기사 없음")
-                        else:
-                            for _, row in df_kw.iterrows():
-                                link = row["link"]
-                                pub = row["published"]
-                                pub_str = (
-                                    pub.strftime("%Y-%m-%d %H:%M")
-                                    if pd.notnull(pub)
-                                    else ""
-                                )
-                                ck = widget_key("select", link)
+    with summary_col:
+        render_summary_panel()
 
-                                st.markdown(
-                                    '<div class="news-card">', unsafe_allow_html=True
-                                )
-                                c1, c2 = st.columns([0.2, 0.8])
-                                with c1:
-                                    checked = st.checkbox("", key=ck)
-                                with c2:
-                                    st.markdown(
-                                        f'<div class="news-card-title"><a href="{link}" target="_blank">{row["title"]}</a></div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                    st.markdown(
-                                        f'<div class="news-card-meta">{pub_str}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                st.markdown(
-                                    "</div>", unsafe_allow_html=True
-                                )
+    selected_links = []
 
-                                if checked:
-                                    selected_links.append(link)
-
-            st.markdown("---")
-
-            # 고객사 동향 블록
-            customer_df = df_view[df_view["keyword"].isin(CUSTOMER_KEYWORDS)]
-            st.markdown("#### 고객사 동향")
-            if customer_df.empty:
-                st.caption("고객사 관련 기사가 없습니다.")
-            else:
-                for _, row in customer_df.iterrows():
-                    link = row["link"]
-                    pub = row["published"]
-                    pub_str = (
-                        pub.strftime("%Y-%m-%d %H:%M") if pd.notnull(pub) else ""
-                    )
-                    ck = widget_key("select", link)
-
-                    st.markdown(
-                        '<div class="news-card">', unsafe_allow_html=True
-                    )
-                    c1, c2 = st.columns([0.08, 0.92])
-                    with c1:
-                        checked = st.checkbox("", key=ck)
-                    with c2:
-                        st.markdown(
-                            f'<div class="news-card-title"><a href="{link}" target="_blank">{row["title"]}</a></div>',
-                            unsafe_allow_html=True,
-                        )
-                        st.markdown(
-                            f'<div class="news-card-meta">{pub_str} · {row["keyword"]}</div>',
-                            unsafe_allow_html=True,
-                        )
-                    st.markdown("</div>", unsafe_allow_html=True)
-
-                    if checked:
-                        selected_links.append(link)
-
-            st.markdown("---")
-
-            # 경쟁사 동향 블록
-            competitor_df = df_view[df_view["keyword"].isin(COMPETITOR_KEYWORDS)]
-            st.markdown("#### 경쟁사 동향")
-            if competitor_df.empty:
-                st.caption("경쟁사 관련 기사가 없습니다.")
-            else:
-                cols_comp = st.columns(len(COMPETITOR_KEYWORDS))
-                for kw, col in zip(COMPETITOR_KEYWORDS, cols_comp):
-                    with col:
-                        st.markdown(f"**{kw}**")
-                        df_kw = competitor_df[competitor_df["keyword"] == kw]
-                        if df_kw.empty:
-                            st.caption("기사 없음")
-                        else:
-                            for _, row in df_kw.iterrows():
-                                link = row["link"]
-                                pub = row["published"]
-                                pub_str = (
-                                    pub.strftime("%Y-%m-%d %H:%M")
-                                    if pd.notnull(pub)
-                                    else ""
-                                )
-                                ck = widget_key("select", link)
-
-                                st.markdown(
-                                    '<div class="news-card">', unsafe_allow_html=True
-                                )
-                                c1, c2 = st.columns([0.2, 0.8])
-                                with c1:
-                                    checked = st.checkbox("", key=ck)
-                                with c2:
-                                    st.markdown(
-                                        f'<div class="news-card-title"><a href="{link}" target="_blank">{row["title"]}</a></div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                    st.markdown(
-                                        f'<div class="news-card-meta">{pub_str}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                st.markdown(
-                                    "</div>", unsafe_allow_html=True
-                                )
-
-                                if checked:
-                                    selected_links.append(link)
-
-        # 2) 개별 모드: 기존 로직 재사용
+    with main_col:
+        if df_view.empty:
+            st.info("현재 조건에 해당하는 뉴스가 없습니다.")
         else:
-            if mode == "관계사 동향":
-                group_keywords = RELATION_KEYWORDS
-            elif mode == "고객사 동향":
-                group_keywords = CUSTOMER_KEYWORDS
-            else:
-                group_keywords = COMPETITOR_KEYWORDS
-
-            if len(group_keywords) > 1:
-                cols = st.columns(len(group_keywords))
-                for kw, col in zip(group_keywords, cols):
-                    with col:
-                        st.markdown(f"**{kw}**")
-                        df_kw = df_view[df_view["keyword"] == kw]
-                        if df_kw.empty:
-                            st.caption("기사 없음")
-                        else:
-                            for _, row in df_kw.iterrows():
-                                link = row["link"]
-                                pub = row["published"]
-                                pub_str = (
-                                    pub.strftime("%Y-%m-%d %H:%M")
-                                    if pd.notnull(pub)
-                                    else ""
-                                )
-                                ck = widget_key("select", link)
-
-                                st.markdown(
-                                    '<div class="news-card">', unsafe_allow_html=True
-                                )
-                                c1, c2 = st.columns([0.2, 0.8])
-                                with c1:
-                                    checked = st.checkbox("", key=ck)
-                                with c2:
-                                    st.markdown(
-                                        f'<div class="news-card-title"><a href="{link}" target="_blank">{row["title"]}</a></div>',
-                                        unsafe_allow_html=True,
+            if mode == "전체":
+                # 관계사 블록
+                relation_df = df_view[df_view["keyword"].isin(RELATION_KEYWORDS)]
+                st.markdown("#### 관계사 동향")
+                if relation_df.empty:
+                    st.caption("관계사 관련 기사가 없습니다.")
+                else:
+                    cols_rel = st.columns(len(RELATION_KEYWORDS))
+                    for kw, col in zip(RELATION_KEYWORDS, cols_rel):
+                        with col:
+                            st.markdown(f"**{kw}**")
+                            df_kw = relation_df[relation_df["keyword"] == kw]
+                            if df_kw.empty:
+                                st.caption("기사 없음")
+                            else:
+                                for _, row in df_kw.iterrows():
+                                    link = row["link"]
+                                    pub = row["published"]
+                                    pub_str = (
+                                        pub.strftime("%Y-%m-%d %H:%M")
+                                        if pd.notnull(pub)
+                                        else ""
                                     )
-                                    st.markdown(
-                                        f'<div class="news-card-meta">{pub_str}</div>',
-                                        unsafe_allow_html=True,
+                                    ck = widget_key("select", link)
+                                    summary_key = widget_key("summary", link)
+
+                                    st.markdown('<div class="news-card">', unsafe_allow_html=True)
+                                    c1, c2 = st.columns([0.2, 0.8])
+                                    with c1:
+                                        checked = st.checkbox("", key=ck)
+                                    with c2:
+                                        st.markdown(
+                                            f'<div class="news-card-title"><a href="{link}" target="_blank">{row["title"]}</a></div>',
+                                            unsafe_allow_html=True,
+                                        )
+                                        st.markdown(
+                                            f'<div class="news-card-meta">{pub_str}</div>',
+                                            unsafe_allow_html=True,
+                                        )
+                                    if st.button("요약 보기", key=summary_key):
+                                        st.session_state["summary_info"] = {
+                                            "title": row["title"],
+                                            "link": link,
+                                            "keyword": row["keyword"],
+                                            "published": pub,
+                                        }
+                                        st.session_state["summary_text"] = get_article_summary(link)
+                                    st.markdown("</div>", unsafe_allow_html=True)
+
+                                    if checked:
+                                        selected_links.append(link)
+
+                st.markdown("---")
+
+                # 고객사 블록
+                customer_df = df_view[df_view["keyword"].isin(CUSTOMER_KEYWORDS)]
+                st.markdown("#### 고객사 동향")
+                if customer_df.empty:
+                    st.caption("고객사 관련 기사가 없습니다.")
+                else:
+                    for _, row in customer_df.iterrows():
+                        link = row["link"]
+                        pub = row["published"]
+                        pub_str = (
+                            pub.strftime("%Y-%m-%d %H:%M") if pd.notnull(pub) else ""
+                        )
+                        ck = widget_key("select", link)
+                        summary_key = widget_key("summary", link)
+
+                        st.markdown('<div class="news-card">', unsafe_allow_html=True)
+                        c1, c2 = st.columns([0.08, 0.92])
+                        with c1:
+                            checked = st.checkbox("", key=ck)
+                        with c2:
+                            st.markdown(
+                                f'<div class="news-card-title"><a href="{link}" target="_blank">{row["title"]}</a></div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div class="news-card-meta">{pub_str} · {row["keyword"]}</div>',
+                                unsafe_allow_html=True,
+                            )
+                        if st.button("요약 보기", key=summary_key):
+                            st.session_state["summary_info"] = {
+                                "title": row["title"],
+                                "link": link,
+                                "keyword": row["keyword"],
+                                "published": pub,
+                            }
+                            st.session_state["summary_text"] = get_article_summary(link)
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+                        if checked:
+                            selected_links.append(link)
+
+                st.markdown("---")
+
+                # 경쟁사 블록
+                competitor_df = df_view[df_view["keyword"].isin(COMPETITOR_KEYWORDS)]
+                st.markdown("#### 경쟁사 동향")
+                if competitor_df.empty:
+                    st.caption("경쟁사 관련 기사가 없습니다.")
+                else:
+                    cols_comp = st.columns(len(COMPETITOR_KEYWORDS))
+                    for kw, col in zip(COMPETITOR_KEYWORDS, cols_comp):
+                        with col:
+                            st.markdown(f"**{kw}**")
+                            df_kw = competitor_df[competitor_df["keyword"] == kw]
+                            if df_kw.empty:
+                                st.caption("기사 없음")
+                            else:
+                                for _, row in df_kw.iterrows():
+                                    link = row["link"]
+                                    pub = row["published"]
+                                    pub_str = (
+                                        pub.strftime("%Y-%m-%d %H:%M")
+                                        if pd.notnull(pub)
+                                        else ""
                                     )
-                                st.markdown(
-                                    "</div>", unsafe_allow_html=True
-                                )
+                                    ck = widget_key("select", link)
+                                    summary_key = widget_key("summary", link)
 
-                                if checked:
-                                    selected_links.append(link)
+                                    st.markdown('<div class="news-card">', unsafe_allow_html=True)
+                                    c1, c2 = st.columns([0.2, 0.8])
+                                    with c1:
+                                        checked = st.checkbox("", key=ck)
+                                    with c2:
+                                        st.markdown(
+                                            f'<div class="news-card-title"><a href="{link}" target="_blank">{row["title"]}</a></div>',
+                                            unsafe_allow_html=True,
+                                        )
+                                        st.markdown(
+                                            f'<div class="news-card-meta">{pub_str}</div>',
+                                            unsafe_allow_html=True,
+                                        )
+                                    if st.button("요약 보기", key=summary_key):
+                                        st.session_state["summary_info"] = {
+                                            "title": row["title"],
+                                            "link": link,
+                                            "keyword": row["keyword"],
+                                            "published": pub,
+                                        }
+                                        st.session_state["summary_text"] = get_article_summary(link)
+                                    st.markdown("</div>", unsafe_allow_html=True)
+
+                                    if checked:
+                                        selected_links.append(link)
+
             else:
-                # 키워드 하나 (삼성)
-                for _, row in df_view.iterrows():
-                    link = row["link"]
-                    pub = row["published"]
-                    pub_str = (
-                        pub.strftime("%Y-%m-%d %H:%M") if pd.notnull(pub) else ""
-                    )
-                    ck = widget_key("select", link)
+                # 개별 모드 (관계사/고객사/경쟁사 중 하나)
+                if mode == "관계사 동향":
+                    group_keywords = RELATION_KEYWORDS
+                elif mode == "고객사 동향":
+                    group_keywords = CUSTOMER_KEYWORDS
+                else:
+                    group_keywords = COMPETITOR_KEYWORDS
 
-                    st.markdown(
-                        '<div class="news-card">', unsafe_allow_html=True
-                    )
-                    c1, c2 = st.columns([0.08, 0.92])
-                    with c1:
-                        checked = st.checkbox("", key=ck)
-                    with c2:
-                        st.markdown(
-                            f'<div class="news-card-title"><a href="{link}" target="_blank">{row["title"]}</a></div>',
-                            unsafe_allow_html=True,
+                if len(group_keywords) > 1:
+                    cols = st.columns(len(group_keywords))
+                    for kw, col in zip(group_keywords, cols):
+                        with col:
+                            st.markdown(f"**{kw}**")
+                            df_kw = df_view[df_view["keyword"] == kw]
+                            if df_kw.empty:
+                                st.caption("기사 없음")
+                            else:
+                                for _, row in df_kw.iterrows():
+                                    link = row["link"]
+                                    pub = row["published"]
+                                    pub_str = (
+                                        pub.strftime("%Y-%m-%d %H:%M")
+                                        if pd.notnull(pub)
+                                        else ""
+                                    )
+                                    ck = widget_key("select", link)
+                                    summary_key = widget_key("summary", link)
+
+                                    st.markdown('<div class="news-card">', unsafe_allow_html=True)
+                                    c1, c2 = st.columns([0.2, 0.8])
+                                    with c1:
+                                        checked = st.checkbox("", key=ck)
+                                    with c2:
+                                        st.markdown(
+                                            f'<div class="news-card-title"><a href="{link}" target="_blank">{row["title"]}</a></div>',
+                                            unsafe_allow_html=True,
+                                        )
+                                        st.markdown(
+                                            f'<div class="news-card-meta">{pub_str}</div>',
+                                            unsafe_allow_html=True,
+                                        )
+                                    if st.button("요약 보기", key=summary_key):
+                                        st.session_state["summary_info"] = {
+                                            "title": row["title"],
+                                            "link": link,
+                                            "keyword": row["keyword"],
+                                            "published": pub,
+                                        }
+                                        st.session_state["summary_text"] = get_article_summary(link)
+                                    st.markdown("</div>", unsafe_allow_html=True)
+
+                                    if checked:
+                                        selected_links.append(link)
+                else:
+                    # 키워드 하나 (예: 삼성)
+                    for _, row in df_view.iterrows():
+                        link = row["link"]
+                        pub = row["published"]
+                        pub_str = (
+                            pub.strftime("%Y-%m-%d %H:%M") if pd.notnull(pub) else ""
                         )
-                        st.markdown(
-                            f'<div class="news-card-meta">{pub_str} · {row["keyword"]}</div>',
-                            unsafe_allow_html=True,
-                        )
-                    st.markdown("</div>", unsafe_allow_html=True)
+                        ck = widget_key("select", link)
+                        summary_key = widget_key("summary", link)
 
-                    if checked:
-                        selected_links.append(link)
+                        st.markdown('<div class="news-card">', unsafe_allow_html=True)
+                        c1, c2 = st.columns([0.08, 0.92])
+                        with c1:
+                            checked = st.checkbox("", key=ck)
+                        with c2:
+                            st.markdown(
+                                f'<div class="news-card-title"><a href="{link}" target="_blank">{row["title"]}</a></div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div class="news-card-meta">{pub_str} · {row["keyword"]}</div>',
+                                unsafe_allow_html=True,
+                            )
+                        if st.button("요약 보기", key=summary_key):
+                            st.session_state["summary_info"] = {
+                                "title": row["title"],
+                                "link": link,
+                                "keyword": row["keyword"],
+                                "published": pub,
+                            }
+                            st.session_state["summary_text"] = get_article_summary(link)
+                        st.markdown("</div>", unsafe_allow_html=True)
 
-        # 스크랩 버튼
-        if scrap_button_top:
-            if not selected_links:
-                st.warning("스크랩할 기사를 하나 이상 선택하세요.")
-            else:
-                new = history_df[history_df["link"].isin(selected_links)]
-                st.session_state["scrap_df"] = (
-                    pd.concat([st.session_state["scrap_df"], new])
-                    .drop_duplicates("link")
-                    .sort_values("published", ascending=False, na_position="last")
-                )
-                st.success(f"{len(new)}개 기사를 스크랩함에 저장했습니다.")
+                        if checked:
+                            selected_links.append(link)
 
-        # 표 보기
-        st.markdown("---")
-        st.markdown("표 형태로 보기")
-        table_df = df_view.copy()
-        if table_df["published"].notnull().any():
-            table_df["published"] = table_df["published"].dt.strftime(
-                "%Y-%m-%d %H:%M"
+    # 🔹 선택 기사 스크랩 저장
+    if scrap_button_top:
+        if not selected_links:
+            st.warning("스크랩할 기사를 하나 이상 선택하세요.")
+        else:
+            new = history_df[history_df["link"].isin(selected_links)]
+            st.session_state["scrap_df"] = (
+                pd.concat([st.session_state["scrap_df"], new])
+                .drop_duplicates("link")
+                .sort_values("published", ascending=False, na_position="last")
             )
-        else:
-            table_df["published"] = ""
-        table_df = table_df[["keyword", "published", "title", "link"]]
-        st.dataframe(table_df, use_container_width=True, hide_index=True)
+            st.success(f"{len(new)}개 기사를 스크랩함에 저장했습니다.")
 
-        # 메일 발송
-        if send_mail_button:
-            try:
-                send_email(recipient_email, group_label, df_view)
-                st.success("메일 발송을 완료했습니다.")
-            except Exception as e:
-                st.error(f"메일 발송 중 오류: {e}")
+    # 🔹 메일 발송: 선택된 기사만
+    if send_mail_button:
+        if not recipient_email:
+            st.warning("받는 사람 이메일을 입력하세요.")
+        elif not selected_links:
+            st.warning("메일로 보낼 기사를 하나 이상 선택하세요.")
+        else:
+            df_send = df_view[df_view["link"].isin(selected_links)]
+            if df_send.empty:
+                st.warning("선택한 기사 데이터가 없습니다.")
+            else:
+                try:
+                    send_email(recipient_email, group_label, df_send)
+                    st.success(f"{recipient_email} 주소로 Daily 뉴스 메일을 발송했습니다.")
+                except Exception as e:
+                    st.error(f"메일 발송 중 오류가 발생했습니다: {e}")
+
+    # 표 보기
+    st.markdown("---")
+    st.markdown("표 형태로 보기")
+    table_df = df_view.copy()
+    if table_df["published"].notnull().any():
+        table_df["published"] = table_df["published"].dt.strftime(
+            "%Y-%m-%d %H:%M"
+        )
+    else:
+        table_df["published"] = ""
+    table_df = table_df[["keyword", "published", "title", "link"]]
+    st.dataframe(table_df, use_container_width=True, hide_index=True)
 
 # =========================
 # 스크랩 모드
