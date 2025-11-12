@@ -4,7 +4,7 @@ import requests
 from datetime import datetime, timedelta
 import re
 import smtplib
-from email.mime.text import MIMEText
+from email.mime_text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # =========================
@@ -16,7 +16,7 @@ RELATION_KEYWORDS = [
     "그래디언트",
     "아이마켓코리아",
     "테라펙스",
-    "GBCC",        # 🔹 GBCC 그룹 (GBCC + 그래디언트바이오컨버전스)
+    "GBCC",        # GBCC 그룹 (GBCC + 그래디언트바이오컨버전스)
     "안연케어",
 ]
 
@@ -26,7 +26,7 @@ RELATION_SEARCH_KEYWORDS = [
     "아이마켓코리아",
     "테라펙스",
     "GBCC",
-    "그래디언트바이오컨버전스",   # 🔹 GBCC로 묶일 alias
+    "그래디언트바이오컨버전스",   # GBCC로 묶일 alias
     "안연케어",
 ]
 
@@ -40,7 +40,7 @@ COMPETITOR_KEYWORDS = [
     "행복나래",
 ]
 
-# 실제로 검색에 사용할 전체 키워드 리스트
+# 실제 검색용 전체 키워드
 SEARCH_KEYWORDS = RELATION_SEARCH_KEYWORDS + CUSTOMER_KEYWORDS + COMPETITOR_KEYWORDS
 
 # 네이버 뉴스 검색용
@@ -110,7 +110,7 @@ st.markdown(
 
 st.title("뉴스 모니터링")
 st.write(
-    "한시간 단위 자동 업데이트"
+    "한시간 단위 자동 업데이트 "
 )
 
 # =========================
@@ -264,7 +264,7 @@ with st.sidebar:
     st.header("보기 모드")
     mode = st.radio(
         "카테고리 선택",
-        ["전체", "관계사 동향", "삼성 동향", "경쟁사 동향", "스크랩"],
+        ["전체", "관계사 동향", "삼성 동향", "경쟁사 동향", "스크랩"],  # 🔹 고객사 → 삼성
         index=0,
     )
 
@@ -319,7 +319,7 @@ def render_keyword_columns(df: pd.DataFrame, keywords, selected_links):
                         selected_links.append(link)
 
 def render_vertical_list(df: pd.DataFrame, selected_links, show_keyword=True):
-    """키워드 하나(예: 삼성)일 때 세로 리스트로 카드 렌더링"""
+    """키워드 하나(삼성)일 때 세로 리스트로 카드 렌더링"""
     for _, row in df.iterrows():
         link = row["link"]
         pub = row["published"]
@@ -361,7 +361,7 @@ if mode != "스크랩":
     elif mode == "관계사 동향":
         df_view = history_df[history_df["keyword"].isin(RELATION_KEYWORDS)]
         group_label = "관계사 동향"
-    elif mode == "삼성 동향":
+    elif mode == "삼성 동향":   # 🔹 여기 변경
         df_view = history_df[history_df["keyword"].isin(CUSTOMER_KEYWORDS)]
         group_label = "삼성 동향"
     else:  # 경쟁사 동향
@@ -374,7 +374,7 @@ if mode != "스크랩":
     if df_view.empty:
         st.info("현재 조건에 해당하는 뉴스가 없습니다.")
     else:
-        # 1) 전체 모드: 관계사 / 고객사 / 경쟁사 블록
+        # 1) 전체 모드: 관계사 / 삼성 / 경쟁사 블록
         if mode == "전체":
             # 관계사 동향 블록
             relation_df = df_view[df_view["keyword"].isin(RELATION_KEYWORDS)]
@@ -386,9 +386,9 @@ if mode != "스크랩":
 
             st.markdown("---")
 
-            # 고객사 동향 블록
+            # 삼성 동향 블록
             customer_df = df_view[df_view["keyword"].isin(CUSTOMER_KEYWORDS)]
-            st.markdown("#### 삼성 동향")
+            st.markdown("#### 삼성 동향")   # 🔹 제목 변경
             if customer_df.empty:
                 st.caption("삼성 관련 기사가 없습니다.")
             else:
@@ -408,7 +408,7 @@ if mode != "스크랩":
         else:
             if mode == "관계사 동향":
                 group_keywords = RELATION_KEYWORDS
-            elif mode == "삼성 동향":
+            elif mode == "삼성 동향":   # 🔹 여기 변경
                 group_keywords = CUSTOMER_KEYWORDS
             else:
                 group_keywords = COMPETITOR_KEYWORDS
@@ -417,8 +417,8 @@ if mode != "스크랩":
                 # 관계사 / 경쟁사: 가로 컬럼
                 render_keyword_columns(df_view, group_keywords, selected_links)
             else:
-                # 고객사(삼성): 세로 리스트
-                render_keyword_columns(df_view, selected_links, show_keyword=True)
+                # 삼성(단일): 세로 리스트
+                render_vertical_list(df_view, selected_links, show_keyword=True)
 
     # 🔹 스크랩 저장
     if scrap_button_top:
