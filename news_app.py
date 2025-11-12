@@ -1,17 +1,19 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta, timezone  # 🔹 timezone 추가
+from datetime import datetime, timedelta, timezone
 import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# 🔹 한국 시간대(KST = UTC+9) 정의
+# 🔹 한국 시간대(KST = UTC+9)
 KST = timezone(timedelta(hours=9))
+
 
 def now_kst():
     return datetime.now(KST)
+
 
 # =========================
 # 1. 기본 설정
@@ -22,7 +24,7 @@ RELATION_KEYWORDS = [
     "그래디언트",
     "아이마켓코리아",
     "테라펙스",
-    "GBCC",        # GBCC 그룹 (GBCC + 그래디언트바이오컨버전스)
+    "GBCC",  # GBCC 그룹 (GBCC + 그래디언트바이오컨버전스)
     "안연케어",
 ]
 
@@ -32,7 +34,7 @@ RELATION_SEARCH_KEYWORDS = [
     "아이마켓코리아",
     "테라펙스",
     "GBCC",
-    "그래디언트바이오컨버전스",   # GBCC로 묶일 alias
+    "그래디언트바이오컨버전스",  # GBCC로 묶일 alias
     "안연케어",
 ]
 
@@ -115,17 +117,17 @@ st.markdown(
 )
 
 st.title("뉴스 모니터링")
-st.write(
-    "한시간 단위 자동 업데이트 "
-)
+st.write("한시간 단위 자동 업데이트")
 
 # =========================
 # 유틸 함수
 # =========================
 
+
 def widget_key(prefix: str, link: str) -> str:
     """체크박스/위젯 키를 링크 기반으로 안정적으로 생성"""
     return f"{prefix}_{abs(hash(link))}"
+
 
 def fetch_news_for_keyword(keyword: str, display: int = 30, sort: str = "date"):
     base_url = "https://openapi.naver.com/v1/search/news.json"
@@ -152,7 +154,7 @@ def fetch_news_for_keyword(keyword: str, display: int = 30, sort: str = "date"):
         pub_dt = None
         if pub_str:
             try:
-                # 🔹 네이버 pubDate를 파싱해서 한국 시간대(KST)로 변환
+                # 네이버 pubDate → KST
                 pub_dt = datetime.strptime(
                     pub_str, "%a, %d %b %Y %H:%M:%S %z"
                 ).astimezone(KST)
@@ -162,6 +164,7 @@ def fetch_news_for_keyword(keyword: str, display: int = 30, sort: str = "date"):
             {"keyword": keyword, "title": title, "link": link, "published": pub_dt}
         )
     return results
+
 
 def fetch_all_news():
     all_items = []
@@ -178,6 +181,7 @@ def fetch_all_news():
     df["keyword"] = df["keyword"].replace(alias_map)
 
     return df.sort_values("published", ascending=False, na_position="last")
+
 
 def send_email(to_email: str, keyword_label: str, df: pd.DataFrame):
     """선택된 기사들만 메일로 발송"""
@@ -212,6 +216,20 @@ def send_email(to_email: str, keyword_label: str, df: pd.DataFrame):
         server.login(SMTP_USER, SMTP_PASSWORD)
         server.send_message(msg)
 
+
+# 표 보기용 날짜 포맷 함수
+def format_published(x):
+    if pd.isnull(x):
+        return ""
+    if isinstance(x, datetime):
+        return x.strftime("%Y-%m-%d %H:%M")
+    try:
+        dt = pd.to_datetime(x)
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(x)
+
+
 # =========================
 # 세션 상태 초기화
 # =========================
@@ -236,6 +254,10 @@ with top_col1:
     manual_refresh = st.button("수동 업데이트")
 with top_col2:
     scrap_button_top = st.button("기사 스크랩")
+with top_col3:
+    # 마지막 업데이트 문구 제거
+    st.empty()
+
 
 def load_data():
     df_new = fetch_all_news()
@@ -245,11 +267,12 @@ def load_data():
             .drop_duplicates("link")
             .sort_values("published", ascending=False, na_position="last")
         )
-    # 🔹 마지막 업데이트 시간을 KST 기준으로 저장
+    # KST 기준 시간 기록
     st.session_state["last_update"] = now_kst()
 
+
 last = st.session_state["last_update"]
-# 🔹 자동 업데이트도 KST 기준 시간으로 비교
+# 한 시간마다 자동 업데이트 (KST 기준)
 need_refresh = not last or (now_kst() - last > timedelta(hours=1))
 if manual_refresh or need_refresh:
     with st.spinner("네이버 뉴스 가져오는 중..."):
@@ -282,6 +305,7 @@ with st.sidebar:
 # =========================
 # 렌더링 헬퍼들
 # =========================
+
 
 def render_keyword_columns(df: pd.DataFrame, keywords, selected_links):
     """키워드를 가로 컬럼으로 배치하고, 각 컬럼 안에 기사 카드들 배치"""
@@ -319,6 +343,7 @@ def render_keyword_columns(df: pd.DataFrame, keywords, selected_links):
                     if checked:
                         selected_links.append(link)
 
+
 def render_vertical_list(df: pd.DataFrame, selected_links, show_keyword=True):
     """키워드 하나(삼성)일 때 세로 리스트로 카드 렌더링"""
     for _, row in df.iterrows():
@@ -349,6 +374,7 @@ def render_vertical_list(df: pd.DataFrame, selected_links, show_keyword=True):
 
         if checked:
             selected_links.append(link)
+
 
 # =========================
 # 메인
@@ -451,14 +477,14 @@ if mode != "스크랩":
                 except Exception as e:
                     st.error(f"메일 발송 중 오류가 발생했습니다: {e}")
 
-    # 표 형태 보기
+    # =========================
+    # 표 형태로 보기 (오류 수정 버전)
+    # =========================
     st.markdown("---")
     st.markdown("표 형태로 보기")
+
     table_df = df_view.copy()
-    if table_df["published"].notnull().any():
-        table_df["published"] = table_df["published"].dt.strftime("%Y-%m-%d %H:%M")
-    else:
-        table_df["published"] = ""
+    table_df["published"] = table_df["published"].apply(format_published)
     table_df = table_df[["keyword", "published", "title", "link"]]
     st.dataframe(table_df, use_container_width=True, hide_index=True)
 
