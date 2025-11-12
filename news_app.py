@@ -11,13 +11,22 @@ from email.mime.multipart import MIMEMultipart
 # 1. 기본 설정
 # =========================
 
-# 그룹별 키워드
+# 관계사: 화면에 보여줄 키워드 (컬럼 이름용)
 RELATION_KEYWORDS = [
     "아이마켓코리아",
     "그래디언트",
     "테라펙스",
+    "GBCC",        # 🔹 GBCC 그룹 (GBCC + 그래디언트바이오컨버전스)
+    "안연케어",
+]
+
+# 관계사: 실제 네이버에 검색할 키워드 (GBCC 그룹에 alias 추가)
+RELATION_SEARCH_KEYWORDS = [
+    "아이마켓코리아",
+    "그래디언트",
+    "테라펙스",
     "GBCC",
-    "그래디언트바이오컨버전스",
+    "그래디언트바이오컨버전스",   # 🔹 GBCC로 묶일 alias
     "안연케어",
 ]
 
@@ -31,7 +40,8 @@ COMPETITOR_KEYWORDS = [
     "행복나래",
 ]
 
-KEYWORDS = RELATION_KEYWORDS + CUSTOMER_KEYWORDS + COMPETITOR_KEYWORDS
+# 실제로 검색에 사용할 전체 키워드 리스트
+SEARCH_KEYWORDS = RELATION_SEARCH_KEYWORDS + CUSTOMER_KEYWORDS + COMPETITOR_KEYWORDS
 
 # 네이버 뉴스 검색용
 NAVER_CLIENT_ID = "A4iaEzPgpbxGewkEWvyW"
@@ -41,7 +51,7 @@ NAVER_CLIENT_SECRET = "DPyZaHzOEZ"
 SMTP_SERVER = "smtp.naver.com"
 SMTP_PORT = 587
 SMTP_USER = "wjdeocjf1708@naver.com"
-SMTP_PASSWORD = "여기에_네이버_앱비밀번호_또는_메일비밀번호"  # 이 부분만 실제 값으로 바꿔 쓰기
+SMTP_PASSWORD = "여기에_네이버_앱비밀번호_또는_메일비밀번호"
 FROM_EMAIL = SMTP_USER
 
 st.set_page_config(
@@ -149,11 +159,18 @@ def fetch_news_for_keyword(keyword: str, display: int = 30, sort: str = "date"):
 
 def fetch_all_news():
     all_items = []
-    for kw in KEYWORDS:
+    for kw in SEARCH_KEYWORDS:
         all_items.extend(fetch_news_for_keyword(kw))
     if not all_items:
         return pd.DataFrame(columns=["keyword", "title", "link", "published"])
     df = pd.DataFrame(all_items).drop_duplicates("link")
+
+    # 🔹 alias 처리: "그래디언트바이오컨버전스" → "GBCC"로 통합
+    alias_map = {
+        "그래디언트바이오컨버전스": "GBCC",
+    }
+    df["keyword"] = df["keyword"].replace(alias_map)
+
     return df.sort_values("published", ascending=False, na_position="last")
 
 def send_email(to_email: str, keyword_label: str, df: pd.DataFrame):
@@ -263,7 +280,7 @@ with st.sidebar:
         send_mail_button = False
 
 # =========================
-# 렌더링 헬퍼들 (가로 컬럼 / 세로 리스트)
+# 렌더링 헬퍼들
 # =========================
 
 def render_keyword_columns(df: pd.DataFrame, keywords, selected_links):
@@ -358,7 +375,7 @@ if mode != "스크랩":
     if df_view.empty:
         st.info("현재 조건에 해당하는 뉴스가 없습니다.")
     else:
-        # 1) 전체 모드: 관계사 / 고객사 / 경쟁사 블록 순서대로
+        # 1) 전체 모드: 관계사 / 고객사 / 경쟁사 블록
         if mode == "전체":
             # 관계사 동향 블록
             relation_df = df_view[df_view["keyword"].isin(RELATION_KEYWORDS)]
@@ -388,7 +405,7 @@ if mode != "스크랩":
             else:
                 render_keyword_columns(competitor_df, COMPETITOR_KEYWORDS, selected_links)
 
-        # 2) 개별 모드(관계사/고객사/경쟁사)
+        # 2) 개별 모드
         else:
             if mode == "관계사 동향":
                 group_keywords = RELATION_KEYWORDS
@@ -398,7 +415,7 @@ if mode != "스크랩":
                 group_keywords = COMPETITOR_KEYWORDS
 
             if len(group_keywords) > 1:
-                # 관계사/경쟁사: 가로 컬럼
+                # 관계사 / 경쟁사: 가로 컬럼
                 render_keyword_columns(df_view, group_keywords, selected_links)
             else:
                 # 고객사(삼성): 세로 리스트
