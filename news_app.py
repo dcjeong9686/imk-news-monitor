@@ -1,11 +1,17 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone  # 🔹 timezone 추가
 import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+
+# 🔹 한국 시간대(KST = UTC+9) 정의
+KST = timezone(timedelta(hours=9))
+
+def now_kst():
+    return datetime.now(KST)
 
 # =========================
 # 1. 기본 설정
@@ -146,9 +152,10 @@ def fetch_news_for_keyword(keyword: str, display: int = 30, sort: str = "date"):
         pub_dt = None
         if pub_str:
             try:
+                # 🔹 네이버 pubDate를 파싱해서 한국 시간대(KST)로 변환
                 pub_dt = datetime.strptime(
                     pub_str, "%a, %d %b %Y %H:%M:%S %z"
-                ).astimezone()
+                ).astimezone(KST)
             except Exception:
                 pass
         results.append(
@@ -246,10 +253,12 @@ def load_data():
             .drop_duplicates("link")
             .sort_values("published", ascending=False, na_position="last")
         )
-    st.session_state["last_update"] = datetime.now().astimezone()
+    # 🔹 마지막 업데이트 시간을 KST 기준으로 저장
+    st.session_state["last_update"] = now_kst()
 
 last = st.session_state["last_update"]
-need_refresh = not last or (datetime.now().astimezone() - last > timedelta(hours=1))
+# 🔹 자동 업데이트도 KST 기준 시간으로 비교
+need_refresh = not last or (now_kst() - last > timedelta(hours=1))
 if manual_refresh or need_refresh:
     with st.spinner("네이버 뉴스 가져오는 중..."):
         load_data()
@@ -264,7 +273,7 @@ with st.sidebar:
     st.header("보기 모드")
     mode = st.radio(
         "카테고리 선택",
-        ["전체", "관계사 동향", "삼성 동향", "경쟁사 동향", "스크랩"],  # 🔹 고객사 → 삼성
+        ["전체", "관계사 동향", "삼성 동향", "경쟁사 동향", "스크랩"],
         index=0,
     )
 
@@ -361,7 +370,7 @@ if mode != "스크랩":
     elif mode == "관계사 동향":
         df_view = history_df[history_df["keyword"].isin(RELATION_KEYWORDS)]
         group_label = "관계사 동향"
-    elif mode == "삼성 동향":   # 🔹 여기 변경
+    elif mode == "삼성 동향":
         df_view = history_df[history_df["keyword"].isin(CUSTOMER_KEYWORDS)]
         group_label = "삼성 동향"
     else:  # 경쟁사 동향
@@ -388,7 +397,7 @@ if mode != "스크랩":
 
             # 삼성 동향 블록
             customer_df = df_view[df_view["keyword"].isin(CUSTOMER_KEYWORDS)]
-            st.markdown("#### 삼성 동향")   # 🔹 제목 변경
+            st.markdown("#### 삼성 동향")
             if customer_df.empty:
                 st.caption("삼성 관련 기사가 없습니다.")
             else:
@@ -408,7 +417,7 @@ if mode != "스크랩":
         else:
             if mode == "관계사 동향":
                 group_keywords = RELATION_KEYWORDS
-            elif mode == "삼성 동향":   # 🔹 여기 변경
+            elif mode == "삼성 동향":
                 group_keywords = CUSTOMER_KEYWORDS
             else:
                 group_keywords = COMPETITOR_KEYWORDS
