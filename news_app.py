@@ -236,14 +236,6 @@ with top_col1:
     manual_refresh = st.button("수동 업데이트")
 with top_col2:
     scrap_button_top = st.button("기사 스크랩")
-with top_col3:
-    if st.session_state["last_update"]:
-        st.caption(
-            "마지막 업데이트: "
-            + st.session_state["last_update"].strftime("%Y-%m-%d %H:%M:%S")
-        )
-    else:
-        st.caption("아직 업데이트된 적이 없습니다.")
 
 def load_data():
     df_new = fetch_all_news()
